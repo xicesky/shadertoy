@@ -83,9 +83,8 @@ vec3 rotateZ( vec3 p, float angle )
 
 // Scene result type
 #define SRESULT vec2
-#define SRESULT_DEFAULT vec2(9999.0, 0.0) // Default value for SRESULT
 
-SRESULT composite( SRESULT a, SRESULT b )
+vec2 composite( vec2 a, vec2 b )
 {
     // Returns the minimum distance and the index of the object
     return (a.x < b.x) ? a : b;
@@ -110,9 +109,9 @@ const Material materialList[8] = Material[8](
     Material(0, vec3(0.0, 0.0, 0.0))  // DUMMY: Black filler
 );
 
-SRESULT sdScene( float time, vec3 p )
+vec2 sdScene( float time, vec3 p )
 {
-    SRESULT current = SRESULT_DEFAULT; // Initialize with a large distance and no object
+    vec2 current = vec2(9999.0, 0.0); // Initialize with a large distance and no object
 
     // Floor
     ADD_OBJECT( 1, sdPlaneY(p - vec3(0.0, -3.0, 0.0)) );
@@ -139,9 +138,6 @@ SRESULT sdScene( float time, vec3 p )
 
     // Cube rotating around the X-axis
     ADD_OBJECT( 6, sdBox(rotateX(p - vec3(0.0, 0.0, 0.0), time * -0.5), vec3(1.0, 1.0, 1.0)) );
-
-    // == Start domain repetition ==
-    // vec3 p_f = vec3(p.x )
 
     return current;
 }
@@ -343,7 +339,7 @@ vec3 rayMarch( float time, vec3 rayInitialPosition, vec3 rayDirection )
     for (i = 0; i < maxSteps; i++)
     {
         vec3 position = rayInitialPosition + t * rayDirection; // Current point along the ray
-        SRESULT sceneResult = sdScene(time, position); // Get the SRESULT of the scene
+        vec2 sceneResult = sdScene(time, position); // Find distance to the nearest surface in the scene
         float d = sceneResult.x; // Distance to the nearest surface
 
         if (d < minDistance) // If we are close enough to the surface
