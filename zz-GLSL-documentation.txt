@@ -1,0 +1,8 @@
+The GLSL documentation is pretty bad in my opinion, they don't even clarify their data types correctly.
+But here are some links:
+    Data types: https://www.khronos.org/opengl/wiki/Data_Type_(GLSL)
+    GLSL ES 3.0 spec (relevant for WebGL 2.0 used in Shadertoy):
+        https://registry.khronos.org/OpenGL/specs/es/3.0/GLSL_ES_Specification_3.00.pdf
+
+Some info on shadertoy (also very badly documented):
+    Built-in functions: https://gist.github.com/markknol/d06c0167c75ab5c6720fe9083e4319e1

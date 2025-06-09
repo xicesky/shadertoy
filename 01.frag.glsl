@@ -41,6 +41,13 @@ float sdTorus( vec3 p, vec2 t )
     return length(q)-t.y;
 }
 
+// Vertical cylinder
+float sdCylinder( vec3 p, vec2 h )
+{
+    vec2 d = abs(vec2(length(p.xz),p.y)) - h;
+    return min(max(d.x,d.y),0.0) + length(max(d,0.0));
+}
+
 /* -----------------------------------------------------------------------------
     Rotation functions
 */
@@ -87,15 +94,20 @@ SRESULT composite( SRESULT a, SRESULT b )
 #define ADD_OBJECT( index, objectSDF ) \
     current = composite( vec2(objectSDF, index), current )
 
-const vec3 materialColor[8]=vec3[8](
-    vec3(0.0,0.0,0.0), // No hit color (black)
-    vec3(0.2,0.2,0.2), // Floor
-    vec3(0.2,0.3,0.2), // Left wall
-    vec3(0.9,0.1,0.1), // Sphere in the foreground
-    vec3(0.1,0.1,0.9), // Torus around the sphere
-    vec3(0.0,0.9,0.0), // Sphere in positive Y
-    vec3(0.8,0.8,0.1), // Cube rotating around the X-axis
-    vec3(0.0,0.0,0.0)  // DUMMY: Black filler
+struct Material {
+    int textureIndex;
+    vec3 color;
+};
+
+const Material materialList[8] = Material[8](
+    Material(0, vec3(0.0, 0.0, 0.0)), // No hit color (black)
+    Material(1, vec3(0.5, 0.5, 0.5)), // Floor: Gray checkerboard
+    Material(0, vec3(0.2, 0.3, 0.2)), // Wall
+    Material(0, vec3(0.9, 0.1, 0.1)), // Sphere in the foreground
+    Material(0, vec3(0.1, 0.1, 0.9)), // Torus around the sphere
+    Material(0, vec3(0.0, 0.9, 0.0)), // Sphere in positive Y
+    Material(0, vec3(0.8, 0.8, 0.1)), // Cube rotating around the X-axis
+    Material(0, vec3(0.0, 0.0, 0.0))  // DUMMY: Black filler
 );
 
 SRESULT sdScene( float time, vec3 p )
@@ -106,25 +118,30 @@ SRESULT sdScene( float time, vec3 p )
     ADD_OBJECT( 1, sdPlaneY(p - vec3(0.0, -3.0, 0.0)) );
 
     // Left wall
-    ADD_OBJECT( 2, sdPlaneX(p - vec3(-3.0, 0.0, 0.0)) );
+    ADD_OBJECT( 2, sdPlaneX(p - vec3(-4.0, 0.0, 0.0)) );
+
+    // Back wall
+    ADD_OBJECT( 2, sdPlaneZ(p - vec3(0.0, 0.0, 4.0)) );
 
     // Sphere in the foreground
-    ADD_OBJECT( 3, sdSphere(p - vec3(0.0, 0.0, 0.0), 1.0) );
+    // ADD_OBJECT( 3, sdSphere(p - vec3(0.0, 0.0, 0.0), 1.0) );
 
     // Torus around the sphere
-    // vec3 torusP = p - vec3(0.0, 0.0, 0.0);      // Position
-    // torusP = rotateY(torusP, time * 0.5);       // Rotate around the Y-axis based on time
-    // torusP = rotateX(torusP, 0.5 * 3.1415926);  // Rotate 90° around the X-axis
-    vec3 torusP = p - vec3(-2.0 + sin(time * 0.1), 0.0, 0.0);      // Position
-    // torusP = rotateY(torusP, time * 0.5);
-    torusP = rotateX(torusP, time * 0.5);
-    ADD_OBJECT( 4, sdTorus(torusP, vec2(1.5, 0.5)) );
+    // vec3 torusP = p - vec3(-2.0 + sin(time * 0.1), 0.0, 0.0);      // Position
+    // torusP = rotateX(torusP, time * 0.5);
+    // ADD_OBJECT( 4, sdTorus(torusP, vec2(1.5, 0.5)) );
+
+    // Cylinder
+    ADD_OBJECT( 4, sdCylinder(p - vec3(0.0, -1.0, 0.0), vec2(1.0, 2.0)) );
 
     // Sphere in positive Y
     ADD_OBJECT( 5, sdSphere(p - vec3(0.0, 2.0, 0.0), 1.0) );
 
     // Cube rotating around the X-axis
-    ADD_OBJECT( 6, sdBox(rotateX(p - vec3(0.0, 0.0, 0.0), time * 0.5), vec3(1.0, 1.0, 1.0)) );
+    ADD_OBJECT( 6, sdBox(rotateX(p - vec3(0.0, 0.0, 0.0), time * -0.5), vec3(1.0, 1.0, 1.0)) );
+
+    // == Start domain repetition ==
+    // vec3 p_f = vec3(p.x )
 
     return current;
 }
@@ -137,7 +154,7 @@ SRESULT sdScene( float time, vec3 p )
 #define ZERO (min(iFrame,0))
 
 // Calculate the normal vector at a point in the scene
-#define NORMALS_HACK 0
+#define NORMALS_HACK 1
 
 vec3 nScene( float time, vec3 pos )
 {
@@ -145,10 +162,12 @@ vec3 nScene( float time, vec3 pos )
 #if NORMALS_HACK == 0
     // Source: https://iquilezles.org/articles/normalsSDF/
     vec2 e = vec2(1.0,-1.0)*0.5773*h;
-    return normalize( e.xyy*sdScene(time, pos + e.xyy).x + 
-                      e.yyx*sdScene(time, pos + e.yyx).x + 
-                      e.yxy*sdScene(time, pos + e.yxy).x + 
-                      e.xxx*sdScene(time, pos + e.xxx).x );
+    return normalize(
+        e.xyy*sdScene(time, pos + e.xyy).x +
+        e.yyx*sdScene(time, pos + e.yyx).x +
+        e.yxy*sdScene(time, pos + e.yxy).x +
+        e.xxx*sdScene(time, pos + e.xxx).x
+    );
 #else
     // Source: https://iquilezles.org/articles/normalsSDF/
     vec3 n = vec3(0.0);
@@ -163,7 +182,7 @@ vec3 nScene( float time, vec3 pos )
 
 float ambientOcclusion( float time, vec3 pos, vec3 normal )
 {
-	float occ = 0.0;
+    float occ = 0.0;
     float sca = 1.0;
     for( int i=ZERO; i<5; i++ )
     {
@@ -176,15 +195,8 @@ float ambientOcclusion( float time, vec3 pos, vec3 normal )
 }
 
 /* -----------------------------------------------------------------------------
-    Coloring
+    Material coloring / texturing
 */
-
-/* Sets color output mode.
-    0: Standard (material based) coloring
-    1: Analysis mode: Color by iterations and distance
-    2: Analysis mode: Color by normals
-*/
-#define COLOR 0
 
 vec3 colorNormal( vec3 normalVector )
 {
@@ -203,21 +215,42 @@ vec3 colorNormal( vec3 normalVector )
     return (normalVector + 1.0) / 2.0;
 }
 
-// Function to look up a value in an array with linear interpolation
-vec3 lookupMaterialColor( float index )
+// Lookup material
+Material lookupMaterial( float index )
 {
-    // Clamp the index to the range of the array
-    index = clamp(index, 0.0, float(materialColor.length() - 1));
-    
-    // Get the integer part and fractional part
-    int i = int(index);
-    float f = index - float(i);
-    
-    // Linear interpolation between two colors
-    if (i < materialColor.length() - 1) {
-        return mix(materialColor[i], materialColor[i + 1], f);
-    } else {
-        return materialColor[i]; // If at the end, just return the last color
+    int i = int(clamp(index, 0.0, float(materialList.length() - 1)));
+    return materialList[i];
+}
+
+// Basic checkerboard pattern, used for debugging
+vec3 checkerboard( vec2 p, vec3 color1, vec3 color2)
+{
+    float c = mod(floor(p.x) + floor(p.y), 2.0);
+    return c < 1.0 ? color1 : color2;
+}
+
+// Filtered checkerboard pattern
+// Original: https://iquilezles.org/articles/checkerfiltering
+vec3 checkersGradBox(in vec2 p, in vec2 dpdx, in vec2 dpdy, vec3 color1, vec3 color2)
+{
+    // filter kernel
+    vec2 w = abs(dpdx)+abs(dpdy) + 0.001;
+    // analytical integral (box filter)
+    vec2 i = 2.0*(abs(fract((p-0.5*w)*0.5)-0.5)-abs(fract((p+0.5*w)*0.5)-0.5))/w;
+    // xor pattern
+    return mix(color1, color2, 0.5 - 0.5*i.x*i.y);
+}
+
+vec3 calcMaterialColor(float index, Material material, vec3 position)
+{
+    switch (material.textureIndex)
+    {
+        case 0: // No texture
+            return material.color; // Return the color directly
+        case 1: // Checkerboard texture based on xz plane
+            return checkerboard(position.xz, vec3(0.0, 0.0, 0.0), material.color);
+        default:
+            return vec3(0.0); // Default case, shouldn't happen
     }
 }
 
@@ -228,14 +261,26 @@ vec3 distanceFade( vec3 c, vec3 fadeColor, float distance )
     return mix(fadeColor, c, fade);
 }
 
+/* -----------------------------------------------------------------------------
+    Complete ray rendering output
+*/
+
+/* Sets rendering mode.
+    0: Standard (material based) coloring
+    1: Analysis mode: Color by iterations and distance
+    2: Analysis mode: Color by normals
+*/
+#define RENDER_MODE 0
+
 vec3 colorRay( float time, bool hit, float objectIndex, float distance, int iteration, int maxIteration, vec3 position )
 {
-#if COLOR == 0
+#if RENDER_MODE == 0
     vec3 normal = nScene(time, position);
     vec3 total = vec3(0.0); // Initialize total color
     // Standard material based coloring
     // Hit color: Look up material based on object index
-    vec3 materialColor = lookupMaterialColor(objectIndex);
+    Material material = lookupMaterial(objectIndex);
+    vec3 materialColor = calcMaterialColor(objectIndex, material, position);
     // materialColor = materialColor * (0.4 + 0.6 * colorNormal(normal)) ; // Looks funny
     // materialColor = mix(materialColor, colorNormal(normal)*0.8, 0.5); // Mix normal color with material color, kinda iridescent
     
@@ -254,7 +299,7 @@ vec3 colorRay( float time, bool hit, float objectIndex, float distance, int iter
 
     total += pow(color, vec3(0.45)); // Apply gamma correction !?!?
     return total;
-#elif COLOR == 1
+#elif RENDER_MODE == 1
     // Analysis mode: Color by iterations and distance
     if (!hit) {
         // No hit color: Blue to purple gradient based on iteration
@@ -265,7 +310,7 @@ vec3 colorRay( float time, bool hit, float objectIndex, float distance, int iter
         // Hit color: Black sphere with some fading to white based on distance
         return distanceFade(vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0), distance);
     }
-#elif COLOR == 2
+#elif RENDER_MODE == 2
     // Analysis mode: Color by normals
     if (hit) {
         vec3 normal = nScene(time, position);
@@ -312,6 +357,44 @@ vec3 rayMarch( float time, vec3 rayInitialPosition, vec3 rayDirection )
 }
 
 /* -----------------------------------------------------------------------------
+    Debugging / helper functions
+*/
+
+vec3 sdfVisualize(float time, vec2 uv) {
+    // Scaling factor: "Distance" to cover from the center of the screen to the top or bottom edge
+    const float scale = 4.5; // Adjust as needed for your scene
+
+    // We can hold the time parameter of the scene to a fixed value and use t for something else (e.g. y)
+    float sceneTime = 0.0;
+    float t = 4.0 * sin(time * 0.5); // Example time variation, can be removed if not needed
+
+    // Select a 2D slice of the 3D SDF
+    // E.g. top-down view at y = 0
+    vec3 position = vec3(uv * scale, t).xzy; // Use uv as x and z, y = 0
+
+    // Evaluate the SDF at this position
+    float d = sdScene(sceneTime, position).x;
+
+    // Rest ist colorization:
+    // Outer and inner color as a base
+    vec3 col = (d>0.0) ? vec3(0.9,0.6,0.3) : vec3(0.65,0.85,1.0);
+    // col *= 1.0 - exp(-6.0*abs(d)); // ???
+    col *= 0.8 + 0.2*cos(31.416*d); // "isolines"
+    // Object boundaries
+    col = mix( col, vec3(1.0), 1.0-smoothstep(0.0,0.035,abs(d)) );
+    return col;
+}
+
+/* -----------------------------------------------------------------------------
+    Uniforms
+*/
+// // Uniforms provided by the environment (e.g., Shadertoy)
+// uniform vec3 iResolution; // Resolution of the output image
+// uniform float iTime; // Current time in seconds
+// uniform vec4 iMouse; // Mouse position and click state
+// uniform int iFrame; // Current frame number
+
+/* -----------------------------------------------------------------------------
     Main
 */
 
@@ -321,13 +404,27 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     // Clip space: (-f,-1) to (f, 1) (same corners)
     // Where f = iResolution.x / iResolution.y
     vec2 uv = (fragCoord.xy * 2. - iResolution.xy) / iResolution.y;
+
+    // Mouse position, scaled to clip space, too
+    vec2 mousePos = (iMouse.xy * 2. - iResolution.xy) / iResolution.y;
     
-    vec3 cameraOrigin = vec3(0, 0, -3);
+    vec3 cameraPosition = vec3(0, 0, -3);
     vec3 rayDirection = normalize(vec3(uv, 1));
 
-    vec3 color = rayMarch(iTime, cameraOrigin, rayDirection);
+    // Mouse controls: Vertical rotation
+    float verticalAngle = clamp(-mousePos.y * 1.57, -1.1, 1.1);
+    cameraPosition = rotateX(cameraPosition, verticalAngle);
+    rayDirection = rotateX(rayDirection, verticalAngle);
+
+    // Mouse controls: Horizontal rotation
+    float horizontalAngle = clamp(mousePos.x * 3.14, -3.14, 3.14);
+    cameraPosition = rotateY(cameraPosition, horizontalAngle);
+    rayDirection = rotateY(rayDirection, horizontalAngle);
+
+    // Run the raymarching algorithm
+    vec3 color = rayMarch(iTime, cameraPosition, rayDirection);
+    // vec3 color = sdfVisualize(iTime, uv);
 
     // Output to screen
-    //fragColor = vec4(uv, 0, 1);
     fragColor = vec4(color, 1);
 }
