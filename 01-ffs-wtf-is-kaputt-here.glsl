@@ -111,10 +111,10 @@ const Material materialList[8] = Material[8](
 
 vec2 sdScene( float time, vec3 p )
 {
-    vec2 current = vec2(9999.0, 0.0); // Initialize with a large distance and no object
+    vec2 current = vec2(1e20, 0.0); // Initialize with a large distance and no object
 
     // Floor
-    ADD_OBJECT( 1, sdPlaneY(p - vec3(0.0, -3.0, 0.0)) );
+    ADD_OBJECT( 1, sdPlaneY(p - vec3(0.0, -4.0, 0.0)) );
 
     // Left wall
     ADD_OBJECT( 2, sdPlaneX(p - vec3(-4.0, 0.0, 0.0)) );
@@ -131,13 +131,40 @@ vec2 sdScene( float time, vec3 p )
     // ADD_OBJECT( 4, sdTorus(torusP, vec2(1.5, 0.5)) );
 
     // Cylinder
-    ADD_OBJECT( 4, sdCylinder(p - vec3(0.0, -1.0, 0.0), vec2(1.0, 2.0)) );
+    // ADD_OBJECT( 4, sdCylinder(p - vec3(0.0, -1.0, 0.0), vec2(1.0, 2.0)) );
 
     // Sphere in positive Y
     ADD_OBJECT( 5, sdSphere(p - vec3(0.0, 2.0, 0.0), 1.0) );
 
     // Cube rotating around the X-axis
     ADD_OBJECT( 6, sdBox(rotateX(p - vec3(0.0, 0.0, 0.0), time * -0.5), vec3(1.0, 1.0, 1.0)) );
+
+    // == Start domain repetition setup ========================================
+    // FIXME: Still artifacts when objects grow...?!?
+    // FIXME: Need to be able to offset domain by some amount < size
+
+    const float size = 4.0; // Size of the repeating domain
+    vec3 pre_instance = floor(p / size) * vec3(1, 0, 1); // Calculate the instance index
+    // Direction to the nearest neighbor - combined into one vector
+    vec3 pre_combinedNeighbor = sign(p - size * pre_instance);
+
+    // Find minimum distance in this domain or its neighbors
+    float d = 1e20; // Initialize with a large distance
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
+            // The current instance has some dialing numbers we can use
+            vec3 instance = pre_instance + vec3(i, 0, j) * pre_combinedNeighbor;
+            vec3 p_i = p - size * instance; // Position in the current instance
+
+            // Note that your instance is limited to coordinates in the range [0, 4] in x and z
+            // Do NOT place objects outside of this range, or you will get artifacts
+
+            float be_funny = sin(length(instance) + time * 0.2) * 0.5;
+            
+            ADD_OBJECT( 4, sdCylinder(p_i - vec3(2.0, -2.0 + be_funny, 2.0), vec2(1.0, 2.0 + be_funny)) );
+        }
+    }
+    // == End domain repetition setup ==========================================
 
     return current;
 }
@@ -358,15 +385,16 @@ vec3 rayMarch( float time, vec3 rayInitialPosition, vec3 rayDirection )
 
 vec3 sdfVisualize(float time, vec2 uv) {
     // Scaling factor: "Distance" to cover from the center of the screen to the top or bottom edge
-    const float scale = 4.5; // Adjust as needed for your scene
+    const float scale = 3.5; // Adjust as needed for your scene
 
     // We can hold the time parameter of the scene to a fixed value and use t for something else (e.g. y)
-    float sceneTime = 0.0;
-    float t = 4.0 * sin(time * 0.5); // Example time variation, can be removed if not needed
+    float sceneTime = 20.0;
+    float t = 2.0 * sin(15.0 * 0.5); // Example time variation, can be removed if not needed
 
     // Select a 2D slice of the 3D SDF
     // E.g. top-down view at y = 0
     vec3 position = vec3(uv * scale, t).xzy; // Use uv as x and z, y = 0
+    position += vec3(-2.0,0.0,-4.0);
 
     // Evaluate the SDF at this position
     float d = sdScene(sceneTime, position).x;
@@ -418,8 +446,8 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     rayDirection = rotateY(rayDirection, horizontalAngle);
 
     // Run the raymarching algorithm
-    vec3 color = rayMarch(iTime, cameraPosition, rayDirection);
-    // vec3 color = sdfVisualize(iTime, uv);
+    //vec3 color = rayMarch(iTime, cameraPosition, rayDirection);
+     vec3 color = sdfVisualize(iTime, uv);
 
     // Output to screen
     fragColor = vec4(color, 1);
