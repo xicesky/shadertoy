@@ -299,7 +299,6 @@ vec3 colorRay( float time, bool hit, float objectIndex, float distance, int iter
 {
 #if RENDER_MODE == 0
     vec3 normal = nScene(time, position);
-    vec3 total = vec3(0.0); // Initialize total color
     // Standard material based coloring
     // Hit color: Look up material based on object index
     Material material = lookupMaterial(objectIndex);
@@ -311,7 +310,10 @@ vec3 colorRay( float time, bool hit, float objectIndex, float distance, int iter
     vec3 color = vec3(0.0);
 
     vec3 lightDirection = normalize(vec3(-0.8,0.8,-0.2));
-    float light = clamp(dot(normal, lightDirection), 0.04, 1.0);
+    float light
+        = 1.0 * clamp(dot(normal, lightDirection), 0.0, 1.0) // directional "ceiling" light
+        + 0.1                         // ambient light
+    ;
     // float ceilingLight = 0.5 + 0.5 * normal.y; // Light from above based on normal.y
     // float fre = clamp(1.0+dot(normal,lightDirection),0.0,1.0); // Fresnel effect ? Wat? need ray direction...
     float ao = ambientOcclusion(time, position, normal);
@@ -320,8 +322,10 @@ vec3 colorRay( float time, bool hit, float objectIndex, float distance, int iter
     // Apply some fading based on distance ("fog")
     color = distanceFade(color, vec3(0.02), distance);
 
-    total += pow(color, vec3(0.45)); // Apply gamma correction !?!?
-    return total;
+    // See also: https://iquilezles.org/articles/outdoorslighting/
+    color = color / (color+ vec3(1.0)); // Basic "Reinhard" HDR tone mapping
+    color = pow(color, vec3(1.0/2.2)); // Gamma correction - screen dependent
+    return color;
 #elif RENDER_MODE == 1
     // Analysis mode: Color by iterations and distance
     if (!hit) {
