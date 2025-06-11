@@ -83,31 +83,34 @@ vec2 composite(vec2 a, vec2 b) {
 
 struct Material {
     int textureIndex;
-    vec3 color;
+    vec3 diffuseColor;
 };
 
 const Material materialList[8] = Material[8](
-    Material(0, vec3(0.0, 0.0, 0.0)),  // No hit color (black)
-    Material(1, vec3(0.5, 0.5, 0.5)),  // Floor: Gray checkerboard
-    Material(0, vec3(0.2, 0.3, 0.2)),  // Wall
-    Material(0, vec3(0.9, 0.1, 0.1)),  // Sphere in the foreground
-    Material(0, vec3(0.1, 0.1, 0.9)),  // Torus around the sphere
-    Material(0, vec3(0.0, 0.9, 0.0)),  // Sphere in positive Y
-    Material(0, vec3(0.8, 0.8, 0.1)),  // Cube rotating around the X-axis
-    Material(0, vec3(0.0, 0.0, 0.0))   // DUMMY: Black filler
+    Material(0, 0.2 * vec3(0.0, 0.0, 0.0)),  // No hit color (black)
+    Material(1, 0.2 * vec3(0.7, 0.7, 0.7)),  // Floor: Gray checkerboard
+    Material(0, 0.2 * vec3(0.2, 1.0, 0.2)),  // Wall
+    Material(0, 0.2 * vec3(1.0, 0.1, 0.1)),  // Sphere in the foreground
+    Material(0, 0.2 * vec3(0.1, 0.1, 1.0)),  // Torus around the sphere
+    Material(0, 0.2 * vec3(0.0, 1.0, 0.0)),  // Sphere in positive Y
+    Material(0, 0.2 * vec3(1.0, 1.0, 0.1)),  // Cube rotating around the X-axis
+    Material(0, 0.2 * vec3(0.0, 0.0, 0.0))   // DUMMY: Black filler
 );
 
 vec2 sdScene(float time, vec3 p) {
     vec2 current = vec2(1e20, 0.0);  // Initialize with a large distance and no object
 
+    // I want the camera to look at (0,2,0) - so just move the scene for now
+    p -= vec3(0.0, -2.0, 0.0);  // Move the scene down by 2 units
+
     // Floor
     ADD_OBJECT(1, sdPlaneY(p - vec3(0.0, -4.0, 0.0)));
 
     // Left wall
-    ADD_OBJECT(2, sdPlaneX(p - vec3(-4.0, 0.0, 0.0)));
+    // ADD_OBJECT(2, sdPlaneX(p - vec3(-4.0, 0.0, 0.0)));
 
     // Back wall
-    ADD_OBJECT(2, sdPlaneZ(p - vec3(0.0, 0.0, 4.0)));
+    // ADD_OBJECT(2, sdPlaneZ(p - vec3(0.0, 0.0, 4.0)));
 
     // Sphere in the foreground
     // ADD_OBJECT( 3, sdSphere(p - vec3(0.0, 0.0, 0.0), 1.0) );
@@ -145,10 +148,14 @@ vec2 sdScene(float time, vec3 p) {
 
             // Note that your instance is limited to coordinates in the range [-2, 2] in x and z
             // Do NOT place objects outside of this range, or you will get artifacts
+            float instDist = length(instance);
+            float bounceHeight = 0.5 + 10.0 * (1.0 - exp(-0.1 * instDist));
+            float height_div2 = 0.5 + (1.0 + 0.5 * sin(instDist + time * 1.0)) * bounceHeight;
 
-            float be_funny = sin(length(instance) + time * 0.2) * 0.5;
+            // Put cylinder on floor
+            float y_center = -4.0 /* floor */ + height_div2;
 
-            ADD_OBJECT(4, sdCylinder(p_i - vec3(0.0, -2.0 + be_funny, 0.0), vec2(1.0, 2.0 + be_funny)));
+            ADD_OBJECT(4, sdCylinder(p_i - vec3(0.0, y_center, 0.0), vec2(1.0, height_div2)));
         }
     }
     // == End domain repetition setup ==========================================
@@ -188,6 +195,8 @@ vec3 nScene(float time, vec3 pos) {
 }
 
 float ambientOcclusion(float time, vec3 pos, vec3 normal) {
+    // Source: https://www.shadertoy.com/view/Xds3zN
+    // and https://iquilezles.org/articles/nvscene2008/rwwtt.pdf
     float occ = 0.0;
     float sca = 1.0;
     for (int i = ZERO; i < 5; i++) {
@@ -199,9 +208,27 @@ float ambientOcclusion(float time, vec3 pos, vec3 normal) {
     return clamp(1.0 - 3.0 * occ, 0.0, 1.0);
 }
 
+float softshadow(float time, vec3 ro, vec3 rd, float mint, float maxt, float w) {
+    // Source: https://iquilezles.org/articles/rmshadows/
+    float res = 1.0;
+    float t = mint;
+    for (int i = 0; i < 128 && t < maxt; i++) {
+        float h = sdScene(time, ro + t * rd).x;
+        res = min(res, h / (w * t));
+        t += clamp(h, 0.005, 0.50);
+        if (res < -1.0 || t > maxt) break;
+    }
+    res = max(res, -1.0);
+    return 0.25 * (1.0 + res) * (1.0 + res) * (2.0 - res);
+}
+
 /* -----------------------------------------------------------------------------
     Material coloring / texturing
 */
+
+float maxComponent(vec3 v) {
+    return max(max(v.x, v.y), v.z);
+}
 
 vec3 colorNormal(vec3 normalVector) {
     // Generate a color vector based on the normal vector
@@ -244,10 +271,10 @@ vec3 checkersGradBox(in vec2 p, in vec2 dpdx, in vec2 dpdy, vec3 color1, vec3 co
 
 vec3 calcMaterialColor(float index, Material material, vec3 position) {
     switch (material.textureIndex) {
-        case 0:                     // No texture
-            return material.color;  // Return the color directly
-        case 1:                     // Checkerboard texture based on xz plane
-            return checkerboard(position.xz, vec3(0.0, 0.0, 0.0), material.color);
+        case 0:                            // No texture
+            return material.diffuseColor;  // Return the color directly
+        case 1:                            // Checkerboard texture based on xz plane
+            return checkerboard(position.xz, vec3(0.0, 0.0, 0.0), material.diffuseColor);
         default:
             return vec3(0.0);  // Default case, shouldn't happen
     }
@@ -255,7 +282,7 @@ vec3 calcMaterialColor(float index, Material material, vec3 position) {
 
 vec3 distanceFade(vec3 c, vec3 fadeColor, float distance) {
     // Apply a fade effect based on distance
-    float fade = exp(distance > 0.0 ? distance * -0.08 : 0.0);  // Exponential fade
+    vec3 fade = exp(distance > 0.0 ? distance * -0.0002 * vec3(1.0, 2.0, 4.0) : vec3(0.0));
     return mix(fadeColor, c, fade);
 }
 
@@ -280,25 +307,56 @@ vec3 colorRay(float time, bool hit, float objectIndex, float distance, int itera
     // materialColor = materialColor * (0.4 + 0.6 * colorNormal(normal)) ; // Looks funny
     // materialColor = mix(materialColor, colorNormal(normal)*0.8, 0.5); // Mix normal color with material color, kinda iridescent
 
+    vec3 sunDirection = normalize(vec3(-0.6, 0.6, -0.6));
+
     // Add up lights
     vec3 color = vec3(0.0);
 
-    vec3 lightDirection = normalize(vec3(-0.8, 0.8, -0.2));
-    float light                                               // One line per light source:
-        = 1.0 * clamp(dot(normal, lightDirection), 0.0, 1.0)  // directional "ceiling" light
-        + 0.1                                                 // ambient light
-        ;
-    // float ceilingLight = 0.5 + 0.5 * normal.y; // Light from above based on normal.y
+    float occlusionFactor = ambientOcclusion(time, position, normal);
+
+    // One block per light source
+    // Note that a light intensity of 1.0 is not very bright in our HDR setup
+    // Direct sharp sunlight is around 100.0, cloudy sky is around 10.0
+    {
+        // Ambient light - very simple, but keep value low
+        color += materialColor * 0.1 * occlusionFactor;
+    }
+    {
+        // "Sun": Parallel directional light
+        vec3 lightDirection = normalize(vec3(-0.6, 0.6, -0.6));
+        float lightIntensity = 20.0 * clamp(dot(normal, lightDirection), 0.0, 1.0);
+        float shadow = softshadow(time, position, lightDirection, 0.01, 80.0, 0.1);
+        // Not using occlusion factor here, tip in https://iquilezles.org/articles/outdoorslighting/
+        color += materialColor * lightIntensity * shadow;
+    }
+    {
+        // "Sky"
+        vec3 lightDirection = vec3(0.0, 1.0, 0.0);
+        float lightIntensity = 5.0 * clamp(dot(normal, lightDirection), 0.0, 1.0);
+        float shadow = softshadow(time, position, lightDirection, 0.01, 80.0, 0.1);
+        color += materialColor * lightIntensity * shadow * occlusionFactor;
+    }
+    {
+        // Indirect light from the sun
+        vec3 lightDirection = sunDirection * vec3(-1.0, 0.0, -1.0);
+        float lightIntensity = 1.0 * clamp(dot(normal, lightDirection), 0.0, 1.0);
+        color += materialColor * lightIntensity * 0.5 * occlusionFactor;
+    }
     // float fre = clamp(1.0+dot(normal,lightDirection),0.0,1.0); // Fresnel effect ? Wat? need ray direction...
-    float ao = ambientOcclusion(time, position, normal);
-    color += materialColor * light * ao;
 
     // Apply some fading based on distance ("fog")
-    color = distanceFade(color, vec3(0.02), distance);
+    color = distanceFade(color, vec3(5.0), distance);
 
     // See also: https://iquilezles.org/articles/outdoorslighting/
+    color = 1.2 * color;                  // TEMP brightness correction for HDR
     color = color / (color + vec3(1.0));  // Basic "Reinhard" HDR tone mapping
     color = pow(color, vec3(1.0 / 2.2));  // Gamma correction - screen dependent
+
+    // Just for lighting debugging
+    // if (maxComponent(color) > 0.5) {
+    //     return vec3(1.0,0.0,0.0);
+    // }
+
     return color;
 #elif RENDER_MODE == 1
     // Analysis mode: Color by iterations and distance
@@ -334,10 +392,10 @@ vec3 colorRay(float time, bool hit, float objectIndex, float distance, int itera
     rayDirection: The direction of the ray, normalized.
 */
 vec3 rayMarch(float time, vec3 rayInitialPosition, vec3 rayDirection) {
-    float t = 0.0;                    // Distance along the ray
-    const float maxDistance = 100.0;  // Maximum distance to march
-    const float minDistance = 0.001;  // Minimum distance to consider a hit
-    const int maxSteps = 100;         // Maximum number of steps
+    float t = 0.0;                     // Distance along the ray
+    const float maxDistance = 1000.0;  // Maximum distance to march
+    const float minDistance = 0.001;   // Minimum distance to consider a hit
+    const int maxSteps = 200;          // Maximum number of steps
 
     int i;
     for (i = 0; i < maxSteps; i++) {
@@ -387,11 +445,13 @@ vec3 sdfVisualize(float time, vec2 uv) {
 /* -----------------------------------------------------------------------------
     Uniforms
 */
-// // Uniforms provided by the environment (e.g., Shadertoy)
-// uniform vec3 iResolution; // Resolution of the output image
-// uniform float iTime; // Current time in seconds
-// uniform vec4 iMouse; // Mouse position and click state
-// uniform int iFrame; // Current frame number
+
+// Uniforms provided by the environment (e.g., Shadertoy)
+
+// uniform vec3 iResolution;    // Resolution of the output image
+// uniform float iTime;         // Current time in seconds
+// uniform vec4 iMouse;         // Mouse position and click state
+// uniform int iFrame;          // Current frame number
 
 /* -----------------------------------------------------------------------------
     Main
@@ -406,7 +466,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // Mouse position, scaled to clip space, too
     vec2 mousePos = (iMouse.xy * 2. - iResolution.xy) / iResolution.y;
 
-    vec3 cameraPosition = vec3(0, 0, -3);
+    vec3 cameraPosition = vec3(0, 0, -10);
     vec3 rayDirection = normalize(vec3(uv, 1));
 
     // Mouse controls: Vertical rotation
