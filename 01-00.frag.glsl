@@ -90,7 +90,7 @@ const Material materialList[8] = Material[8](
     Material(0, 0.2 * vec3(0.0, 0.0, 0.0)),  // No hit color (black)
     Material(1, 0.2 * vec3(0.7, 0.7, 0.7)),  // Floor: Gray checkerboard
     Material(0, 0.2 * vec3(0.2, 1.0, 0.2)),  // Wall
-    Material(0, 0.2 * vec3(1.0, 0.1, 0.1)),  // Sphere in the foreground
+    Material(0, 0.2 * vec3(1.0, 1.0, 1.0)),  // Sphere in the foreground
     Material(0, 0.2 * vec3(0.1, 0.1, 1.0)),  // Torus around the sphere
     Material(0, 0.2 * vec3(0.0, 1.0, 0.0)),  // Sphere in positive Y
     Material(0, 0.2 * vec3(1.0, 1.0, 0.1)),  // Cube rotating around the X-axis
@@ -112,13 +112,13 @@ vec2 sdScene(float time, vec3 p) {
     // Back wall
     // ADD_OBJECT(2, sdPlaneZ(p - vec3(0.0, 0.0, 4.0)));
 
-    // Sphere in the foreground
-    // ADD_OBJECT( 3, sdSphere(p - vec3(0.0, 0.0, 0.0), 1.0) );
+    // Sphere in the foreground for testing material highlighting
+    // ADD_OBJECT(3, sdSphere(p - vec3(0.0, 0.0, 0.0), 4.0));
 
     // Torus around the sphere
-    // vec3 torusP = p - vec3(-2.0 + sin(time * 0.1), 0.0, 0.0);      // Position
-    // torusP = rotateX(torusP, time * 0.5);
-    // ADD_OBJECT( 4, sdTorus(torusP, vec2(1.5, 0.5)) );
+    vec3 torusP = p - vec3(-1.0, 0.0, 0.0);  // Position
+    torusP = rotateX(torusP, time * 0.5);
+    ADD_OBJECT(4, sdTorus(torusP, vec2(1.5, 0.5)));
 
     // Cylinder
     // ADD_OBJECT( 4, sdCylinder(p - vec3(0.0, -1.0, 0.0), vec2(1.0, 2.0)) );
@@ -133,7 +133,7 @@ vec2 sdScene(float time, vec3 p) {
     // FIXME: Still artifacts when objects grow...?!?
     // FIXME: Need to be able to offset domain by some amount < size
 
-    const float size = 4.0;                               // Size of the repeating domain
+    const float size = 8.0;                               // Size of the repeating domain
     vec3 pre_instance = round(p / size) * vec3(1, 0, 1);  // Calculate the instance index
     // Direction to the nearest neighbor - combined into one vector
     vec3 pre_combinedNeighbor = sign(p - size * pre_instance);
@@ -209,6 +209,25 @@ float ambientOcclusion(float time, vec3 pos, vec3 normal) {
 }
 
 float softshadow(float time, vec3 ro, vec3 rd, float mint, float maxt, float w) {
+    float res = 1.0;
+    float ph = 1e20;
+    float t = mint;
+    for (int i = 0; i < 256 && t < maxt; i++) {
+        float h = sdScene(time, ro + rd * t).x;
+        if (h < 0.001)
+            return 0.0;
+        float y = h * h / (2.0 * ph);
+        float d = sqrt(h * h - y * y);
+        res = min(res, d / (w * max(0.0, t - y)));
+        ph = h;
+        // t += h;  // This is the correct way
+        t += clamp(h, 0.0, 8.0);  // Just a hack to avoid artifacts due to our DR stuff
+    }
+    return res;
+}
+
+// Note: This does not seem to work well with intersecting objects
+float softshadow2(float time, vec3 ro, vec3 rd, float mint, float maxt, float w) {
     // Source: https://iquilezles.org/articles/rmshadows/
     float res = 1.0;
     float t = mint;
@@ -297,7 +316,15 @@ vec3 distanceFade(vec3 c, vec3 fadeColor, float distance) {
 */
 #define RENDER_MODE 0
 
-vec3 colorRay(float time, bool hit, float objectIndex, float distance, int iteration, int maxIteration, vec3 position) {
+vec3 colorRay(
+    float time,
+    bool hit,
+    float objectIndex,
+    vec3 rayDirection,
+    float distance,
+    int iteration,
+    int maxIteration,
+    vec3 position) {
 #if RENDER_MODE == 0
     vec3 normal = nScene(time, position);
     // Standard material based coloring
@@ -307,7 +334,7 @@ vec3 colorRay(float time, bool hit, float objectIndex, float distance, int itera
     // materialColor = materialColor * (0.4 + 0.6 * colorNormal(normal)) ; // Looks funny
     // materialColor = mix(materialColor, colorNormal(normal)*0.8, 0.5); // Mix normal color with material color, kinda iridescent
 
-    vec3 sunDirection = normalize(vec3(-0.6, 0.6, -0.6));
+    vec3 sunDirection = normalize(vec3(0.6, 0.6, 0.8));
 
     // Add up lights
     vec3 color = vec3(0.0);
@@ -323,25 +350,41 @@ vec3 colorRay(float time, bool hit, float objectIndex, float distance, int itera
     }
     {
         // "Sun": Parallel directional light
-        vec3 lightDirection = normalize(vec3(-0.6, 0.6, -0.6));
-        float lightIntensity = 20.0 * clamp(dot(normal, lightDirection), 0.0, 1.0);
-        float shadow = softshadow(time, position, lightDirection, 0.01, 80.0, 0.1);
         // Not using occlusion factor here, tip in https://iquilezles.org/articles/outdoorslighting/
-        color += materialColor * lightIntensity * shadow;
+        vec3 lightDirection = sunDirection;
+        float shadow = softshadow(time, position, lightDirection, 0.01, 60.0, 0.3);
+
+        // Diffuse
+        float diffuseFactor = clamp(dot(normal, lightDirection), 0.0, 1.0) * shadow;
+        color += 1.0 * materialColor * diffuseFactor;
+        // color += 0.5 * vec3(1.0, 1.0, 1.0) * diffuseFactor;  // debug
+
+        // Specular: Don't quite understand this code from IQ yet
+        vec3 hal = normalize(lightDirection - rayDirection);
+        float specular = pow(clamp(dot(normal, hal), 0.0, 1.0), 16.0);
+        specular *= diffuseFactor;
+        specular *= 0.04 + 0.96 * pow(clamp(1.0 - dot(hal, lightDirection), 0.0, 1.0), 5.0);
+        color += 60.0 * specular * vec3(1.30, 1.00, 0.70);
     }
     {
         // "Sky"
         vec3 lightDirection = vec3(0.0, 1.0, 0.0);
-        float lightIntensity = 5.0 * clamp(dot(normal, lightDirection), 0.0, 1.0);
+        float lightIntensity = clamp(dot(normal, lightDirection), 0.0, 1.0);
         float shadow = softshadow(time, position, lightDirection, 0.01, 80.0, 0.1);
-        color += materialColor * lightIntensity * shadow * occlusionFactor;
+        color += 1.0 * materialColor * lightIntensity * shadow * occlusionFactor;
     }
     {
         // Indirect light from the sun
         vec3 lightDirection = sunDirection * vec3(-1.0, 0.0, -1.0);
-        float lightIntensity = 1.0 * clamp(dot(normal, lightDirection), 0.0, 1.0);
-        color += materialColor * lightIntensity * 0.5 * occlusionFactor;
+        float lightIntensity = clamp(dot(normal, lightDirection), 0.0, 1.0);
+        color += 0.1 * materialColor * lightIntensity * occlusionFactor;
     }
+    {
+        // Sub-surface scattering: Simulates light bouncing inside the material
+        float dif = pow(clamp(1.0 + dot(normal, rayDirection), 0.0, 1.0), 2.0);
+        color += 2.5 * materialColor * dif * occlusionFactor;
+    }
+
     // float fre = clamp(1.0+dot(normal,lightDirection),0.0,1.0); // Fresnel effect ? Wat? need ray direction...
 
     // Apply some fading based on distance ("fog")
@@ -404,13 +447,13 @@ vec3 rayMarch(float time, vec3 rayInitialPosition, vec3 rayDirection) {
         float d = sceneResult.x;                                // Distance to the nearest surface
 
         if (d < minDistance)  // If we are close enough to the surface
-            return colorRay(time, true, sceneResult.y, t, i, maxSteps, position);
+            return colorRay(time, true, sceneResult.y, rayDirection, t, i, maxSteps, position);
 
         t += d;                      // Move along the ray by the distance
         if (t > maxDistance) break;  // Stop if we exceed max distance
     }
 
-    return colorRay(time, false, -1.0, maxDistance, i, maxSteps, vec3(0.0));  // No hit
+    return colorRay(time, false, -1.0, rayDirection, maxDistance, i, maxSteps, vec3(0.0));  // No hit
 }
 
 /* -----------------------------------------------------------------------------
